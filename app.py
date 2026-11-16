@@ -10,8 +10,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-HOST = "0.0.0.0"
-PORT = 8000
+HOST = "127.0.0.1"
+PORT = 8090
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 CACHE_TTL = 12
