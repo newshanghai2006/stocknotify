@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票 KDJ 监控</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <div class="brand">
+        <div class="logo">KDJ</div>
+        <div>
+          <h1>股票 KDJ 监控</h1>
+          <p id="rule-text">日线 / 15分钟 / 5分钟 · J&gt;98 且 K&gt;D 超买 · J&lt;2 且 K&lt;D 超卖</p>
+        </div>
+      </div>
+      <div id="clock" class="clock">--:--:--</div>
+    </header>
+
+    <section class="toolbar">
+      <form id="add-form" autocomplete="off">
+        <div class="search-wrap">
+          <input id="code-input" type="text" placeholder="输入代码，例如 688605" />
+          <div id="suggest" class="suggest hidden"></div>
+        </div>
+        <button class="btn-primary" type="submit">加入监控</button>
+      </form>
+      <div class="toolbar-right">
+        <label class="field">超买 J &gt;
+          <input id="ob-input" type="number" step="0.1" min="0" max="100" />
+        </label>
+        <label class="field">超卖 J &lt;
+          <input id="os-input" type="number" step="0.1" min="0" max="100" />
+        </label>
+        <label class="field">刷新秒
+          <input id="interval-input" type="number" step="1" min="5" max="120" />
+        </label>
+        <button id="alert-btn" class="btn-ghost" type="button">开启提醒</button>
+        <button id="demo-btn" class="btn-ghost" type="button">演示弹窗</button>
+        <button id="refresh-btn" class="btn-ghost" type="button">立即刷新</button>
+      </div>
+    </section>
+
+    <section class="legend">
+      <span class="tag ob">超买：J&gt;阈值 且 K&gt;D</span>
+      <span class="tag os">超卖：J&lt;阈值 且 K&lt;D</span>
+      <span class="tag wait">观察中</span>
+      <span class="hint">同一根 K 线只提醒一次，浏览器通知 + 声音 + 页面弹窗</span>
+    </section>
+
+    <section id="board" class="board"></section>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div id="modal-badge" class="modal-badge os">超卖提醒</div>
+      <h2 id="modal-title">先锋精科 688605</h2>
+      <p id="modal-period" class="modal-period">5分钟 KDJ</p>
+      <div class="modal-kdj">
+        <div><b>K</b><span id="modal-k">--</span></div>
+        <div><b>D</b><span id="modal-d">--</span></div>
+        <div><b>J</b><span id="modal-j">--</span></div>
+      </div>
+      <p id="modal-rule" class="modal-rule"></p>
+      <p id="modal-note" class="modal-note"></p>
+      <button id="modal-ok" class="btn-ok" type="button">我知道了</button>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
