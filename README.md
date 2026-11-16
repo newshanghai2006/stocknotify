@@ -1,10 +1,4 @@
-﻿# 11-16 12:45:58
-
-# 
-
-# 执行命令 "ls -la /workspace \&\& printf '\\n--- app.py head ---\\n' \&\& python3 -c "import pathlib; p=pathlib.Path('/workspace/app.py'); print('lines', sum(1 for \_ in p.open()))""
-
-
+﻿
 
 # 如何在个人机器上部署该 KDJ 监控程序。 正在准备中文部署指南。程序基于 Python 3 标准库，无需额外依赖。将说明文件获取、运行方式、后台保持运行及局域网访问方法。 程序需 Python 3.8+。将提供 app.py 与 static 目录，运行后访问 http://127.0.0.1:8000。机器需联网获取股票数据。局域网访问已支持。可选配置后台运行服务。
 
