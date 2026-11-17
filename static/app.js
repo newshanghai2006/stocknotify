@@ -40,6 +40,8 @@ let pollTimer = null;
 let queue = [];
 let modalOpen = false;
 let lastItems = [];
+let alarmTimer = null;
+let alarmNodes = [];
 
 function loadWatchlist() {
   try {
@@ -66,10 +68,19 @@ function loadSeen() {
   }
 }
 
-function persist() {
+function persistLocal() {
   localStorage.setItem(STORAGE.list, JSON.stringify(watchlist));
   localStorage.setItem(STORAGE.settings, JSON.stringify(settings));
   localStorage.setItem(STORAGE.seen, JSON.stringify([...seen].slice(-400)));
+}
+
+function persist() {
+  persistLocal();
+  fetch("/api/watchlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codes: watchlist }),
+  }).catch(() => {});
 }
 
 function applySettingsToForm() {
@@ -79,6 +90,16 @@ function applySettingsToForm() {
   els.alertBtn.textContent = settings.alertOn ? "关闭提醒" : "开启提醒";
   els.alertBtn.classList.toggle("on", settings.alertOn);
   els.ruleText.textContent = `日线 / 15分钟 / 5分钟 · J>${settings.ob} 且 K>D 超买 · J<${settings.os} 且 K<D 超卖`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[c]));
 }
 
 function fmt(n, digits = 2) {
@@ -102,21 +123,53 @@ function ensureAudio() {
   return audioCtx;
 }
 
-function playBeep(type) {
+function stopAlarm() {
+  if (alarmTimer) {
+    clearInterval(alarmTimer);
+    alarmTimer = null;
+  }
+  alarmNodes.forEach((node) => {
+    try { node.stop(); } catch (_) {}
+  });
+  alarmNodes = [];
+}
+
+function beepOnce(type) {
   try {
     const ctx = ensureAudio();
-    const osc = ctx.createOscillator();
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = type === "overbought" ? 880 : 523;
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
-    osc.connect(gain);
+    osc1.type = "square";
+    osc2.type = "square";
+    osc1.frequency.value = type === "overbought" ? 880 : 740;
+    osc2.frequency.value = type === "overbought" ? 1175 : 988;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.02);
+    gain.gain.setValueAtTime(0.42, now + 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+    osc1.connect(gain);
+    osc2.connect(gain);
     gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.36);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.34);
+    osc2.stop(now + 0.34);
+    alarmNodes.push(osc1, osc2);
   } catch (_) {}
+}
+
+function startAlarm(type) {
+  stopAlarm();
+  let count = 0;
+  const play = () => {
+    count += 1;
+    beepOnce(type);
+    if (count >= 3) stopAlarm();
+  };
+  play();
+  alarmTimer = setInterval(play, 480);
 }
 
 function notifyBrowser(item) {
@@ -190,6 +243,7 @@ function showModal(payload, demo = false) {
 }
 
 function closeModal() {
+  stopAlarm();
   els.modal.classList.add("hidden");
   modalOpen = false;
   if (queue.length) {
@@ -200,7 +254,7 @@ function closeModal() {
 
 function fireAlert(payload, demo) {
   if (!demo && !settings.alertOn) return;
-  playBeep(payload.type);
+  startAlarm(payload.type);
   if (!demo) notifyBrowser(payload);
   showModal(payload, demo);
 }
@@ -244,15 +298,15 @@ function panelHtml(p) {
   return `
     <div class="panel ${cls}">
       <div class="panel-top">
-        <strong>${p.label || ""}</strong>
-        <span class="state ${stateCls}">${p.error || state}</span>
+        <strong>${escapeHtml(p.label || "")}</strong>
+        <span class="state ${stateCls}">${escapeHtml(p.error || state)}</span>
       </div>
       <div class="kdj">
         <div><b>K</b><span>${fmt(latest.k)}</span></div>
         <div><b>D</b><span>${fmt(latest.d)}</span></div>
         <div><b>J</b><span>${fmt(latest.j)}</span></div>
       </div>
-      <div class="note">${p.error || note}</div>
+      <div class="note" title="${escapeHtml(p.error || note)}">${escapeHtml(p.error || note)}</div>
       ${sparkline(p.series)}
     </div>`;
 }
@@ -272,8 +326,8 @@ function render(items) {
       <article class="card ${hit ? "hit" : ""}">
         <div class="head">
           <div>
-            <div class="name">${item.name}</div>
-            <div class="code">${item.code}</div>
+            <div class="name">${escapeHtml(item.name)}</div>
+            <div class="code">${escapeHtml(item.code)}</div>
             <div class="quote">开 ${fmt(q.open)}　高 ${fmt(q.high)}　低 ${fmt(q.low)}　换手 ${fmt(q.turnover)}%</div>
           </div>
           <div class="right">
@@ -299,7 +353,7 @@ function renderSuggest(items) {
   }
   els.suggest.classList.remove("hidden");
   els.suggest.innerHTML = items
-    .map((x) => `<div data-code="${x.code}">${x.code} ${x.name}</div>`)
+    .map((x) => `<div data-code="${escapeHtml(x.code)}">${escapeHtml(x.code)} ${escapeHtml(x.name)}</div>`)
     .join("");
 }
 
@@ -310,16 +364,16 @@ async function search(q) {
 }
 
 function addCode(code) {
-  const cleaned = String(code || "").replace(/[^0-9A-Za-z]/g, "");
+  const cleaned = String(code || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
   if (!cleaned) return;
-  if (!watchlist.includes(cleaned)) watchlist.unshift(cleaned);
+  if (!watchlist.includes(cleaned)) watchlist.push(cleaned);
   persist();
   refresh();
 }
 
 function removeCode(code) {
-  watchlist = watchlist.filter((x) => x !== code);
-  if (!watchlist.length) watchlist = [...DEFAULT_CODES];
+  const target = String(code || "").toUpperCase();
+  watchlist = watchlist.filter((x) => String(x).toUpperCase() !== target);
   persist();
   refresh();
 }
@@ -334,9 +388,30 @@ async function refresh() {
     const res = await fetch(`/api/monitor?codes=${encodeURIComponent(watchlist.join(","))}`);
     const data = await res.json();
     const items = data.items || [];
+    if (items.length) {
+      watchlist = items.map((x) => String(x.code || "").toUpperCase()).filter(Boolean);
+      persistLocal();
+    }
     render(items);
     enqueueAlerts(items);
   } catch (_) {}
+}
+
+async function bootWatchlist() {
+  try {
+    const res = await fetch("/api/watchlist");
+    const data = await res.json();
+    const serverCodes = Array.isArray(data.codes) ? data.codes.map((x) => String(x).toUpperCase()).filter(Boolean) : [];
+    const localCodes = loadWatchlist().map((x) => String(x).toUpperCase()).filter(Boolean);
+    const merged = [];
+    [...serverCodes, ...localCodes].forEach((code) => {
+      if (!merged.includes(code)) merged.push(code);
+    });
+    watchlist = merged.length ? merged : [...DEFAULT_CODES];
+    persist();
+  } catch (_) {
+    persistLocal();
+  }
 }
 
 function readFormSettings() {
@@ -413,5 +488,7 @@ document.addEventListener("click", () => { try { ensureAudio(); } catch (_) {} }
 applySettingsToForm();
 tickClock();
 setInterval(tickClock, 1000);
-refresh();
-restartPoll();
+bootWatchlist().finally(() => {
+  refresh();
+  restartPoll();
+});

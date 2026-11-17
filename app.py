@@ -12,7 +12,11 @@ from pathlib import Path
 
 HOST = "127.0.0.1"
 PORT = 8090
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+ROOT_DIR = Path(__file__).resolve().parent
+STATIC_DIR = ROOT_DIR / "static"
+DATA_DIR = ROOT_DIR / "data"
+WATCHLIST_FILE = DATA_DIR / "watchlist.json"
+DEFAULT_CODES = ["688605"]
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 CACHE_TTL = 12
 PERIODS = {
@@ -23,6 +27,43 @@ PERIODS = {
 
 _cache: dict[str, tuple[float, object]] = {}
 _cache_lock = threading.Lock()
+_watchlist_lock = threading.Lock()
+
+
+def normalize_codes(codes) -> list[str]:
+    result = []
+    seen = set()
+    for raw in codes or []:
+        code = re.sub(r"[^0-9A-Za-z]", "", str(raw or "")).upper()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        result.append(code)
+    return result
+
+
+def load_watchlist() -> list[str]:
+    with _watchlist_lock:
+        if WATCHLIST_FILE.exists():
+            try:
+                payload = json.loads(WATCHLIST_FILE.read_text(encoding="utf-8"))
+                codes = normalize_codes(payload.get("codes") if isinstance(payload, dict) else payload)
+                if codes:
+                    return codes
+            except Exception:
+                pass
+        return list(DEFAULT_CODES)
+
+
+def save_watchlist(codes) -> list[str]:
+    codes = normalize_codes(codes)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with _watchlist_lock:
+        WATCHLIST_FILE.write_text(
+            json.dumps({"codes": codes}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    return codes
 
 
 def cache_get(key: str):
@@ -343,9 +384,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            return json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            return {}
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/watchlist":
+            payload = self._read_json()
+            codes = save_watchlist(payload.get("codes") or [])
+            self._json(200, {"codes": codes})
+            return
+        self._json(404, {"error": "not found"})
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -386,13 +444,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(500, {"error": str(exc)})
             return
 
+        if path == "/api/watchlist":
+            self._json(200, {"codes": load_watchlist()})
+            return
+
         if path == "/api/monitor":
-            raw = (qs.get("codes") or ["688605"])[0]
+            raw = (qs.get("codes") or [""])[0]
             codes = [x.strip() for x in raw.split(",") if x.strip()]
-            if not codes:
-                codes = ["688605"]
+            if codes:
+                save_watchlist(codes)
+            else:
+                codes = load_watchlist()
             items = []
-            for code in codes[:12]:
+            for code in codes:
                 try:
                     items.append(monitor_one(code))
                 except Exception as exc:
@@ -416,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    load_watchlist()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"KDJ monitor running on http://{HOST}:{PORT}", flush=True)
     server.serve_forever()
