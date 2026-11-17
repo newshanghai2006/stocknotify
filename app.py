@@ -96,23 +96,41 @@ def http_get(url: str, encoding: str = "utf-8", extra_headers: dict | None = Non
     return raw.decode(encoding, errors="replace")
 
 
+def bare_code(raw: str) -> str:
+    code = re.sub(r"[^0-9A-Za-z]", "", (raw or "")).lower()
+    if code.startswith(("sh", "sz", "bj", "of")) and len(code) >= 8:
+        return code[-6:]
+    if len(code) > 6:
+        code = code[-6:]
+    return code
+
+
+def market_prefix(code: str) -> str:
+    if code.startswith(("15", "16", "18", "12", "00", "30", "20", "39")):
+        return "sz"
+    if code.startswith(("50", "51", "52", "56", "58", "11", "60", "68", "90")):
+        return "sh"
+    if code.startswith(("43", "83", "87", "88", "92")):
+        return "bj"
+    if code.startswith(("6", "9", "5")):
+        return "sh"
+    if code.startswith(("0", "3", "1")):
+        return "sz"
+    if code.startswith(("4", "8")):
+        return "bj"
+    return "sz"
+
+
 def to_symbol(raw: str) -> str:
     code = re.sub(r"[^0-9A-Za-z]", "", (raw or "")).lower()
     if not code:
         raise ValueError("股票代码不能为空")
     if code.startswith(("sh", "sz", "bj")) and len(code) >= 8:
-        return code
-    if len(code) > 6:
-        code = code[-6:]
+        return code[:2] + code[-6:]
+    code = bare_code(code)
     if not re.fullmatch(r"\d{6}", code):
         raise ValueError(f"无效股票代码: {raw}")
-    if code.startswith(("6", "9")):
-        return "sh" + code
-    if code.startswith(("0", "3")):
-        return "sz" + code
-    if code.startswith(("4", "8")):
-        return "bj" + code
-    return "sh" + code
+    return market_prefix(code) + code
 
 
 def parse_jsonp_array(text: str):
@@ -231,20 +249,30 @@ def fetch_quote(symbol: str) -> dict:
 
 
 def search_stock(keyword: str) -> list[dict]:
-    qs = urllib.parse.urlencode({"type": "11,12,13,14,15", "key": keyword})
-    text = http_get(f"https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&{qs}", encoding="gbk")
+    text = http_get(f"https://suggest3.sinajs.cn/suggest/key={urllib.parse.quote(keyword)}", encoding="gbk")
     m = re.search(r'"([^"]*)"', text)
     if not m or not m.group(1):
         return []
     items = []
+    seen = set()
     for chunk in m.group(1).split(";"):
         cols = chunk.split(",")
         if len(cols) < 5:
             continue
+        code = re.sub(r"\D", "", cols[2] or "")[-6:]
+        symbol = (cols[3] or "").lower()
+        if symbol.startswith("of") and re.fullmatch(r"\d{6}", code):
+            symbol = market_prefix(code) + code
+        if not symbol.startswith(("sh", "sz", "bj")):
+            continue
+        key = symbol[-6:] if len(symbol) >= 6 else symbol
+        if key in seen:
+            continue
+        seen.add(key)
         items.append(
             {
-                "symbol": cols[3],
-                "code": cols[2],
+                "symbol": symbol,
+                "code": code or cols[2],
                 "name": cols[4],
             }
         )
